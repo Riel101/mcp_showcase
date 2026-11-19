@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/
+.env
+*.sqlite*
+coverage/
+artifacts/
+.wrangler/
+.dev.vars
+.dev.vars.*
+worker-configuration.d.ts

@@ -1,0 +1,10 @@
+import { mkdirSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
+if (!existsSync('dist/client/index.html')) throw new Error('Run npm run build before packaging.');
+mkdirSync('artifacts', { recursive: true });
+const archive = resolve('artifacts/forme-commerce.tar.gz');
+const files = [...['wrangler.jsonc','tsconfig.worker.json','worker-configuration.d.ts'].filter(existsSync),'README.md','package.json','package-lock.json','tsconfig.json','vite.config.ts','index.html','.env.example','.gitignore','.dockerignore','Dockerfile','compose.yaml','src','public','dist/client','docs','tests','scripts'];
+const result = spawnSync('tar', ['-czf', archive, ...files], { stdio: 'inherit' });
+if (result.status !== 0) throw new Error('Packaging failed. Install tar and try again.');
+console.log(archive);

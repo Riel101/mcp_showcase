@@ -1,0 +1,12 @@
+services:
+  forme:
+    build: .
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      BASE_URL: ${BASE_URL:-http://localhost:3000}
+    volumes:
+      - forme-data:/app/data
+    restart: unless-stopped
+volumes:
+  forme-data:
