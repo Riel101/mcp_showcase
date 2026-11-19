@@ -20,7 +20,7 @@ export function matchesHost(origin: URL, host: string): boolean {
     || (['localhost', '127.0.0.1'].includes(origin.hostname) && [`localhost${port}`, `127.0.0.1${port}`].includes(host.toLowerCase()));
 }
 
-export function createHttpApp(commerce: Commerce, origin: URL, allowedOrigins: string[] = [], trustedClientIpHeader?: string) {
+export function createHttpApp(commerce: Commerce, origin: URL, allowedOrigins: string[] = [], trustedClientIpHeader?: string, fetchPhoto?: (url: URL) => Promise<globalThis.Response>) {
   const baseUrl = origin.origin;
   const auth = createAuth(commerce, { baseUrl, allowedOrigins, trustedClientIpHeader });
   const app = express();
@@ -42,7 +42,7 @@ export function createHttpApp(commerce: Commerce, origin: URL, allowedOrigins: s
   app.use(express.urlencoded({ extended: false, limit: '16kb' }));
   app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'forme' }));
   app.use(auth.router);
-  mountMcp(app, commerce, auth, { baseUrl });
+  mountMcp(app, commerce, auth, { baseUrl, fetchPhoto });
   app.get('/api/products', (req, res) => {
     const input: Record<string, unknown> = {};
     for (const key of ['query', 'category', 'sort']) if (typeof req.query[key] === 'string') input[key] = req.query[key];

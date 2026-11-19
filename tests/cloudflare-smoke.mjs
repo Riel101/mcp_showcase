@@ -121,6 +121,14 @@ try {
   await client.connect(transport, { timeout: 15_000 });
   const { tools } = await client.listTools();
   assert.ok(tools.some(tool => tool.name === 'prepare_checkout'));
+  const discovery = await call('discover_products', { limit: 16 });
+  for (const product of discovery.products) {
+    const details = await requireJson(await request('/api/products/' + product.id), 200, 'Website product');
+    assert.equal(product.image, new URL(details.products[0].images[0], baseUrl).href, 'Discovery must use the storefront photo');
+    const photo = await expectStatus(await request(product.image), 200, 'Discovery photo');
+    assert.match(photo.headers.get('content-type') ?? '', /image\/webp/);
+  }
+  console.log('Discovery images match storefront product images.');
   const cart = await call('manage_cart', { operation: 'add', items: [{ productId: 'daily-mug', quantity: 1 }] });
   assert.equal(cart.itemCount, 1);
   const browserCart = await requireJson(await action('manage_cart', { operation: 'view' }), 200, 'Shared browser cart');

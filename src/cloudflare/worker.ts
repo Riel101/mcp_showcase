@@ -22,7 +22,7 @@ export class FormeStore extends DurableObject<Env> {
     super(ctx, env);
     const commerce = createCommerceWithDatabase(createDurableDatabase(ctx.storage));
     const allowedOrigins = env.MCP_ALLOWED_ORIGINS.split(',').map(value => value.trim()).filter(Boolean);
-    const { app } = createHttpApp(commerce, storeOrigin(env.BASE_URL), allowedOrigins, 'cf-connecting-ip');
+    const { app } = createHttpApp(commerce, storeOrigin(env.BASE_URL), allowedOrigins, 'cf-connecting-ip', url => env.ASSETS.fetch(new Request(url)));
     app.use(handleHttpError);
     // In workerd the listening port is a routing key, not a network socket.
     const server = createServer(app).listen(0);

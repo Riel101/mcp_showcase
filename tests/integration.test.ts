@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createApp } from '../src/server/index.js';
@@ -14,6 +16,7 @@ async function fixture() {
   assert.ok(address && typeof address === 'object');
   const baseUrl = `http://127.0.0.1:${address.port}`;
   const instance = await createApp({ baseUrl, databasePath: ':memory:', serveFrontend: false });
+  instance.app.get('/images/:file', (req, res) => res.sendFile(resolve('public/images', String(req.params.file))));
   server.on('request', instance.app);
   const cookies = new Map<string, string>();
   async function request(path: string, init: RequestInit = {}) {
@@ -85,8 +88,19 @@ test('OAuth-authorized MCP shopping and browser share a single persistent custom
   assert.ok(JSON.stringify(tools).length < 24000, "Tool discovery must remain compact.");
   for (const name of ['discover_products', 'inspect_products', 'manage_cart', 'prepare_checkout', 'place_order', 'track_orders', 'request_return', 'contact_support']) assert.ok(tools.tools.some(tool => tool.name === name), name);
   const call = async <T>(name: string, args: Record<string, unknown> = {}) => resultData<T>(await client.callTool({ name, arguments: args }));
-  const catalog = await call<{ products: Product[] }>('discover_products', { limit: 3 });
+  const catalog = await call<{ products: Array<Pick<Product, 'id'> & { image: string }> }>('discover_products', { limit: 3 });
   assert.ok(catalog.products.length > 0 && catalog.products.length <= 3);
+  for (const summary of catalog.products) {
+    const website = await (await f.request('/api/products/' + summary.id)).json() as { products: Product[] };
+    assert.equal(summary.image, new URL(website.products[0].images[0], f.baseUrl).href);
+    const inspectionResult = await client.callTool({ name: 'inspect_products', arguments: { productIds: [summary.id] } });
+    const inspected = resultData<{ products: Product[] }>(inspectionResult);
+    const photo = (inspectionResult.content as Array<{ type: string; data?: string; mimeType?: string }>).find(block => block.type === 'image');
+    assert.ok(photo?.data, 'Inspection must embed the actual product photo');
+    assert.equal(photo.mimeType, 'image/webp');
+    assert.deepEqual(Buffer.from(photo.data, 'base64'), readFileSync(resolve('public', website.products[0].images[0].slice(1))));
+    assert.equal(summary.image, inspected.products[0].images[0]);
+  }
   const product = catalog.products[0];
   const cart = await call<Cart>('manage_cart', { operation: 'add', items: [{ productId: product.id, quantity: 1 }] });
   assert.equal(cart.itemCount, 1);

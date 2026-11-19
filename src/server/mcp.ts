@@ -48,7 +48,7 @@ type ToolDefinition = {
 const tools: Record<string, ToolDefinition> = {
   discover_products: {
     title: "Find products",
-    description: "Search the Forme catalog by keywords, department, price or stock. Returns compact matches and category names. Prices are integer USD cents.",
+    description: "Search the Forme catalog by keywords, department, price or stock. Returns compact matches with the same primary image URLs used by the storefront, plus category names. Show only these image URLs; never substitute web-search photos. Use inspect_products for embedded photos. Prices are integer USD cents.",
     schema: z.object({
       query: text(150).optional().describe("Product name, material, feature or other keyword."),
       category: text(60).optional().describe("Department such as Home, Desk, Travel or Audio."),
@@ -63,9 +63,10 @@ const tools: Record<string, ToolDefinition> = {
   },
   inspect_products: {
     title: "Inspect products",
-    description: "Get full descriptions, specifications, photos, color options and availability to compare up to six products.",
+    description: "Inspect up to six products with specifications and actual storefront photos as MCP image content. Show the returned photos or their exact URLs, never external retailer or generated substitutes.",
     schema: z.object({
       productIds: productIds.max(6).describe("Product IDs or slugs from catalog search."),
+      includeImages: z.boolean().default(true).describe("Embed primary storefront photos. Set false for text-only comparisons."),
     }),
     annotations: readOnly,
   },
@@ -220,8 +221,8 @@ function toolCall(message: unknown) {
   return { scope: requiredScope(tools[name], record(params?.arguments)), id: request.id };
 }
 
-function productSummary({ id, name, category, price, currency, stock, rating, badge }: Product) {
-  return { id, name, category, price, currency, stock, rating, ...(badge && { badge }) };
+function productSummary({ id, name, category, price, currency, stock, rating, badge, images }: Product) {
+  return { id, name, category, price, currency, stock, rating, image: images[0], ...(badge && { badge }) };
 }
 
 function orderSummary(order: Order) {
@@ -279,7 +280,7 @@ function respondError(res: Response, status: number, code: number, message: stri
   });
 }
 
-export function mountMcp(app: Express, commerce: Commerce, auth: Auth, { baseUrl }: { baseUrl: string }) {
+export function mountMcp(app: Express, commerce: Commerce, auth: Auth, { baseUrl, fetchPhoto = (url: URL) => fetch(url, { redirect: "error", signal: AbortSignal.timeout(10000) }) }: { baseUrl: string; fetchPhoto?: (url: URL) => Promise<globalThis.Response> }) {
   const resourceMetadata = new URL("/.well-known/oauth-protected-resource/mcp", baseUrl).href;
   const challenge = `Bearer resource_metadata="${resourceMetadata}"`;
 
@@ -324,14 +325,14 @@ export function mountMcp(app: Express, commerce: Commerce, auth: Auth, { baseUrl
     const server = new McpServer(
       { name: "forme-commerce", title: "Forme", version: "1.0.0", websiteUrl: new URL(baseUrl).origin },
       {
-        instructions: "Shop Forme with the connected customer's account. Prices, balances and refunds use integer USD cents. Search for product IDs, then inspect products to verify details and color options. Prepare a checkout quote before placing an authorized order.",
+        instructions: "Shop Forme with the connected customer's account. Prices, balances and refunds use integer USD cents. Search for product IDs, then inspect products to verify details and color options. Show product photos using only the returned image URLs; do not substitute generated images or image-search results. Prepare a checkout quote before placing an authorized order.",
         capabilities: { tools: { listChanged: false } },
       },
     );
     for (const [name, tool] of Object.entries(tools)) {
       server.registerTool(name, {
         title: tool.title, description: tool.description, inputSchema: tool.schema, annotations: tool.annotations,
-      }, input => {
+      }, async input => {
         if (!user.scopes.includes(requiredScope(tool, input))) {
           return toolError("insufficient_scope", "This connection needs additional Forme permissions.");
         }
@@ -342,10 +343,34 @@ export function mountMcp(app: Express, commerce: Commerce, auth: Auth, { baseUrl
           if (Buffer.byteLength(serialized) > 48 * 1024) {
             return toolError("result_too_large", "This result exceeds the size limit. Request fewer records or a specific record.");
           }
-          return {
-            content: [{ type: "text", text: serialized }],
-            structuredContent: JSON.parse(serialized) as Record<string, unknown>,
-          };
+          const content: CallToolResult["content"] = [{ type: "text", text: serialized }];
+          if (name === "inspect_products" && input.includeImages !== false) {
+            const photos = await Promise.all((projected.products as Product[]).map(async product => {
+              const path = product.images[0];
+              if (!/^\/images\/[a-z0-9-]+\.webp$/.test(path)) throw new Error("Invalid catalog photo path");
+              const response = await fetchPhoto(new URL(path, baseUrl));
+              if (!response.ok || !response.headers.get("content-type")?.includes("image/webp")) throw new Error("Catalog photo unavailable");
+              const reader = response.body?.getReader();
+              if (!reader) throw new Error("Catalog photo body missing");
+              const chunks: Uint8Array[] = [];
+              let size = 0;
+              try {
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  size += value.byteLength;
+                  if (size > 256 * 1024) throw new Error("Catalog photo exceeds size limit");
+                  chunks.push(value);
+                }
+              } finally { await reader.cancel(); }
+              return { product, data: Buffer.concat(chunks).toString("base64") };
+            }));
+            for (const { product, data } of photos) {
+              content.push({ type: "text", text: `Official Forme photo: ${product.name} (${product.id}). ${new URL(product.images[0], baseUrl).href}` });
+              content.push({ type: "image", data, mimeType: "image/webp" });
+            }
+          }
+          return { content, structuredContent: JSON.parse(serialized) as Record<string, unknown> };
         } catch (error) {
           if (error instanceof CommerceError) return toolError(error.code, error.message);
           console.error("[forme] MCP tool failed:", name);

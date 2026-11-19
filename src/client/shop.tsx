@@ -20,7 +20,7 @@ export function Home() {
         <Link className="button hero-button" href="/#catalog">Explore the collection <ArrowRight size={17} strokeWidth={1.6} /></Link>
       </div>
       <div className="hero-image">
-        <img src="/images/forme-studio.webp" alt="A black task lamp in warm afternoon light on a dark oak desk" fetchPriority="high" />
+        <img src="/images/arc-task-lamp.webp" alt="Arc Task Lamp with an articulated black metal arm on a stone plinth" fetchPriority="high" />
         <Link className="hero-caption" href="/product/arc-task-lamp">
           <span><small>IN THE STUDIO</small><span>Arc Task Lamp</span></span><ArrowUpRight size={20} strokeWidth={1.45} />
         </Link>
